@@ -112,8 +112,6 @@ func (hs *HttpServer) acceptIncomingConnections() {
 		headerBuf := make([]byte, 0, 4096)
 
 		for {
-			// TODO: Handle reading status-line separately and NOT appending to
-			// our buffer such that we can route from it
 			buf := make([]byte, 20)
 			_, err := syscall.Read(incomingSocketFd, buf)
 			headerBuf = append(headerBuf, buf...)
