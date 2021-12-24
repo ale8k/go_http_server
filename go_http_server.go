@@ -16,6 +16,8 @@ to learn more about generic socket handling and prep for epoll/poll/select study
 
 see:
 
+- https://tldp.org/LDP/tlk/net/net.html (great starter article, although I used it for binding)
+
 - https://man7.org/linux/man-pages/man2/socketcall.2.html
 
 - https://man7.org/linux/man-pages/man2/socket.2.html
