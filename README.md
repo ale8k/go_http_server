@@ -1,3 +1,4 @@
+[![Go Reference](https://pkg.go.dev/badge/github.com/ale8k/go_http_server.svg)](https://pkg.go.dev/github.com/ale8k/go_http_server)
 # go_http_server
 A basic http server implementation using Go's syscall libc wrappers.
 
