@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"syscall"
+	"time"
 )
 
 /*
@@ -95,38 +96,36 @@ func (hs *HttpServer) Listen(address []byte, port int, backlog int) {
 
 func (hs *HttpServer) acceptIncomingConnections() {
 	for {
+		// TODO: syscall.Select() open N descriptors to be selected from
+		// for accepting the call, for now creating them on the fly is ok
+		// https://man7.org/linux/man-pages/man2/select.2.html
 		incomingSocketFd, _, _ := syscall.Accept(hs.serverSocketFd)
+		go func() {
+			method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
+			compliant := handleCompliance(incomingSocketFd, proto)
+			if !compliant {
+				return
+			}
 
-		method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
-		fmt.Println(method, path, proto)
-
-		compliant := handleCompliance(incomingSocketFd, proto)
-		if !compliant {
-			break
-		}
-
-		headers, body, err := readIncomingPayload(incomingSocketFd)
-		handleErr(err)
-		// get request object
-		// make response object (both ptr for consistency)
-		// execute cb
-		// flush response obj
-		req := &Request{Headers: headers, Body: body}
-		res := &Response{headers: make(map[string]string)}
-		cb := hs.Router.FindHandler(method, path)
-		if cb != nil {
-			cb(req, res)
-			written, err := syscall.Write(incomingSocketFd, res.parse())
+			headers, body, err := readIncomingPayload(incomingSocketFd)
 			handleErr(err)
-			fmt.Println("written: ", written)
-		} else {
-			res.SetStatus(404)
-			res.SetBody([]byte("No route matching " + method + ":" + path))
-			written, err := syscall.Write(incomingSocketFd, res.parse())
-			handleErr(err)
-			fmt.Println("written: ", written)
-		}
-		syscall.Close(incomingSocketFd)
+			req := &Request{Headers: headers, Body: body}
+			res := &Response{headers: make(map[string]string)}
+			cb := hs.Router.FindHandler(method, path)
+			if cb != nil {
+				cb(req, res)
+				written, err := syscall.Write(incomingSocketFd, res.parse())
+				handleErr(err)
+				fmt.Println("written: ", written)
+			} else {
+				res.SetStatus(404)
+				res.SetBody([]byte("No route matching " + method + ":" + path))
+				written, err := syscall.Write(incomingSocketFd, res.parse())
+				handleErr(err)
+				fmt.Println("written: ", written)
+			}
+			syscall.Close(incomingSocketFd)
+		}()
 	}
 }
 
@@ -136,16 +135,19 @@ func main() {
 	server.Router.AddHandler("GET", "/1", func(req *Request, res *Response) {
 		res.AddHeader("Connection", "close")
 		res.SetBody([]byte("test"))
+		time.Sleep(time.Second * 10)
 	})
 
 	server.Router.AddHandler("GET", "/2", func(req *Request, res *Response) {
 		res.AddHeader("Connection", "close")
 		res.SetBody([]byte("test"))
+		time.Sleep(time.Second * 10)
 	})
 
 	server.Router.AddHandler("GET", "/1/2", func(req *Request, res *Response) {
 		res.AddHeader("Connection", "close")
 		res.SetBody([]byte("test"))
+		time.Sleep(time.Second * 10)
 	})
 
 	server.Listen([]byte{127, 0, 0, 1}, 8000, 1)
