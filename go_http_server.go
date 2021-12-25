@@ -98,6 +98,7 @@ func (hs *HttpServer) acceptIncomingConnections() {
 		incomingSocketFd, _, _ := syscall.Accept(hs.serverSocketFd)
 
 		method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
+		fmt.Println(method, path, proto)
 
 		compliant := handleCompliance(incomingSocketFd, proto)
 		if !compliant {
@@ -105,18 +106,36 @@ func (hs *HttpServer) acceptIncomingConnections() {
 		}
 
 		headers, body, err := readIncomingPayload(incomingSocketFd)
-		fmt.Println(headers, body, err)
+		handleErr(err)
+		// get request object
+		// make response object (both ptr for consistency)
+		// execute cb
+		// flush response obj
+		req := &Request{Headers: headers, Body: body}
+		res := &Response{headers: make(map[string]string)}
+		cb := hs.Router.FindHandler(RequestPath(path))
+		cb(req, res)
+		written, err := syscall.Write(incomingSocketFd, res.parse())
+		handleErr(err)
+		fmt.Println("written: ", written)
+
 		// Response
-		syscall.Write(
-			incomingSocketFd,
-			[]byte("HTTP/1.1 200 OK\r\n"+"Content-Length: 8\r\n"+"Connection: close\r\n\r\nhi world"),
-		)
+		// syscall.Write(
+		// 	incomingSocketFd,
+		// 	[]byte("HTTP/1.1 200 OK\r\n"+"Content-Length: 8\r\n"+"Connection: close\r\n\r\nhi world"),
+		// )
 
 		syscall.Close(incomingSocketFd)
 	}
 }
 
 func main() {
-	server := HttpServer{}
+	server := HttpServer{Router: Router{Handlers: make(map[RequestPath]HandlerCallback)}}
+
+	server.Router.AddHandler("/bob", func(req *Request, res *Response) {
+		res.AddHeader("Connection", "close")
+		res.SetBody([]byte("sort ur head out famala"))
+	})
+
 	server.Listen([]byte{127, 0, 0, 1}, 8000, 1)
 }

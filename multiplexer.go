@@ -2,7 +2,7 @@ package main
 
 // Represents a function to 'handle' the incoming request
 // provided it is multiplexed routed to
-type HandlerCallback func(req interface{}, res interface{})
+type HandlerCallback func(req *Request, res *Response)
 
 // The request path
 type RequestPath string
@@ -18,4 +18,9 @@ type Router struct {
 // TODO: validate path in regex before adding handler, and return err if no valid
 func (r *Router) AddHandler(path RequestPath, callback HandlerCallback) {
 	r.Handlers[path] = callback
+}
+
+// Find a handler for a given requestpath
+func (r *Router) FindHandler(path RequestPath) HandlerCallback {
+	return r.Handlers[path]
 }
