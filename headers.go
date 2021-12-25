@@ -24,6 +24,12 @@ func getStatusLine(fd int) string {
 	return string(statusLineBuf)
 }
 
+// Gets method, path and protocol version from a provided status-line as per RFC2616/1.1
+func getMethodPathProto(statusLine string) (string, string, string) {
+	statusLineSplit := strings.Split(statusLine, " ")
+	return statusLineSplit[0], statusLineSplit[1], statusLineSplit[2]
+}
+
 // Searches for header termination, when found, returns the trailing part of the buffer
 // (the body) as a slice to begin reading into from your initial header designated buffer
 func getHeaderTermination(buffer []byte) []byte {

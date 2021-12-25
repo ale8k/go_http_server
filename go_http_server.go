@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"regexp"
-	"strconv"
 	"syscall"
 )
 
@@ -40,6 +38,10 @@ func handleErr(err error) {
 }
 
 type HttpServer struct {
+	// A request multiplexer capable of taking additional
+	// paths to be registered for the API user to respond to
+	Router Router
+	// Internal use file descriptor for the server binding address
 	serverSocketFd int
 }
 
@@ -91,56 +93,25 @@ func (hs *HttpServer) Listen(address []byte, port int, backlog int) {
 	hs.acceptIncomingConnections()
 }
 
-// Handles version compliance, currently server is 1.1 ONLY
-func (hs *HttpServer) handleCompliance(fd int, statusLine string) bool {
-	compliant := regexp.MustCompile(`HTTP/1.1`).MatchString(statusLine)
-	if !compliant {
-		syscall.Write(
-			fd,
-			[]byte("HTTP/1.1 505 HTTP Version Not Supported\r\n"+"Content-Length: 0\r\n\r\n"),
-		)
-		syscall.Close(fd)
-	}
-	return compliant
-}
-
 func (hs *HttpServer) acceptIncomingConnections() {
 	for {
 		incomingSocketFd, _, _ := syscall.Accept(hs.serverSocketFd)
-		compliant := hs.handleCompliance(incomingSocketFd, getStatusLine(incomingSocketFd))
+
+		method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
+
+		compliant := handleCompliance(incomingSocketFd, proto)
 		if !compliant {
 			break
 		}
-		headerBuf := make([]byte, 0, 4096)
 
-		for {
-			buf := make([]byte, 20)
-			_, err := syscall.Read(incomingSocketFd, buf)
-			headerBuf = append(headerBuf, buf...)
-
-			if err != nil {
-				fmt.Println("err:", err)
-				break
-			} else if body := getHeaderTermination(headerBuf); body != nil {
-				headers := parseHeaders(headerBuf)
-				fmt.Println(headers)
-				if headers["content-length"] != "" {
-					bodyLength, _ := strconv.Atoi(headers["content-length"])
-					b := make([]byte, bodyLength)
-					syscall.Read(incomingSocketFd, b)
-					body = append(body, b...)
-					fmt.Println("b is: ", string(body))
-				}
-				break
-			}
-		}
-
+		headers, body, err := readIncomingPayload(incomingSocketFd)
+		fmt.Println(headers, body, err)
+		// Response
 		syscall.Write(
 			incomingSocketFd,
 			[]byte("HTTP/1.1 200 OK\r\n"+"Content-Length: 8\r\n"+"Connection: close\r\n\r\nhi world"),
 		)
 
-		// close(2)
 		syscall.Close(incomingSocketFd)
 	}
 }

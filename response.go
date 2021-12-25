@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Generic wrapper for Http/1.1 response objectt
+// Generic wrapper for Http/1.1 response object
 type HttpResponse struct {
 	headers map[string]string
 	body    []byte
