@@ -113,18 +113,19 @@ func (hs *HttpServer) acceptIncomingConnections() {
 		// flush response obj
 		req := &Request{Headers: headers, Body: body}
 		res := &Response{headers: make(map[string]string)}
-		cb := hs.Router.FindHandler(RequestPath(path))
-		cb(req, res)
-		written, err := syscall.Write(incomingSocketFd, res.parse())
-		handleErr(err)
-		fmt.Println("written: ", written)
-
-		// Response
-		// syscall.Write(
-		// 	incomingSocketFd,
-		// 	[]byte("HTTP/1.1 200 OK\r\n"+"Content-Length: 8\r\n"+"Connection: close\r\n\r\nhi world"),
-		// )
-
+		cb := hs.Router.FindHandler(method, path)
+		if cb != nil {
+			cb(req, res)
+			written, err := syscall.Write(incomingSocketFd, res.parse())
+			handleErr(err)
+			fmt.Println("written: ", written)
+		} else {
+			res.SetStatus(404)
+			res.SetBody([]byte("No route matching " + method + ":" + path))
+			written, err := syscall.Write(incomingSocketFd, res.parse())
+			handleErr(err)
+			fmt.Println("written: ", written)
+		}
 		syscall.Close(incomingSocketFd)
 	}
 }
@@ -132,9 +133,19 @@ func (hs *HttpServer) acceptIncomingConnections() {
 func main() {
 	server := HttpServer{Router: Router{Handlers: make(map[RequestPath]HandlerCallback)}}
 
-	server.Router.AddHandler("/bob", func(req *Request, res *Response) {
+	server.Router.AddHandler("GET", "/1", func(req *Request, res *Response) {
 		res.AddHeader("Connection", "close")
-		res.SetBody([]byte("sort ur head out famala"))
+		res.SetBody([]byte("test"))
+	})
+
+	server.Router.AddHandler("GET", "/2", func(req *Request, res *Response) {
+		res.AddHeader("Connection", "close")
+		res.SetBody([]byte("test"))
+	})
+
+	server.Router.AddHandler("GET", "/1/2", func(req *Request, res *Response) {
+		res.AddHeader("Connection", "close")
+		res.SetBody([]byte("test"))
 	})
 
 	server.Listen([]byte{127, 0, 0, 1}, 8000, 1)
