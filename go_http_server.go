@@ -106,10 +106,10 @@ func (hs *HttpServer) Listen(address []byte, port int, backlog int) {
 	hs.acceptIncomingConnections()
 }
 
-// Break into own func for better profiling
 func (hs *HttpServer) respondToRequest(incomingSocketFd int) {
 	start := time.Now()
 	method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
+
 	compliant := handleCompliance(incomingSocketFd, proto)
 	if !compliant {
 		return
@@ -117,8 +117,10 @@ func (hs *HttpServer) respondToRequest(incomingSocketFd int) {
 
 	headers, body, err := readIncomingPayload(incomingSocketFd)
 	handleErr(err)
+
 	req := &Request{Headers: headers, Body: body}
 	res := &Response{headers: make(map[string]string)}
+
 	cb := hs.Router.FindHandler(method, path)
 	if cb != nil {
 		cb(req, res)
@@ -151,9 +153,9 @@ func (hs *HttpServer) acceptIncomingConnections() {
 			// https://stackoverflow.com/questions/22304631/what-is-the-purpose-to-set-sock-cloexec-flag-with-accept4-same-as-o-cloexec/22305269
 			syscall.CloseOnExec(incomingSocketFd)
 			reqCount.count++
-			if reqCount.count%1000 == 0 {
-				fmt.Printf("reqcount: %v\n", reqCount.count)
-			}
+			//if reqCount.count%1000 == 0 {
+			fmt.Printf("reqcount: %v\n", reqCount.count)
+			//}
 
 			go hs.respondToRequest(incomingSocketFd)
 		}
@@ -182,5 +184,5 @@ func main() {
 		time.Sleep(time.Second * 10)
 	})
 
-	server.Listen([]byte{127, 0, 0, 1}, 8000, 0)
+	server.Listen([]byte{127, 0, 0, 1}, 8000, 10)
 }
