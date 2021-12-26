@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"syscall"
@@ -23,15 +24,17 @@ func readIncomingPayload(incomingSocketFd int) (map[string]string, []byte, error
 		buf := make([]byte, 20)
 		_, err := syscall.Read(incomingSocketFd, buf)
 		headerBuf = append(headerBuf, buf...)
-
 		if err != nil {
+			fmt.Println("error occured in read")
 			break
 		} else if body = getHeaderTermination(headerBuf); body != nil {
 			headers = parseHeaders(headerBuf)
 			if headers["content-length"] != "" {
 				bodyLength, _ := strconv.Atoi(headers["content-length"])
 				b := make([]byte, bodyLength)
-				syscall.Read(incomingSocketFd, b)
+				fmt.Println("attempting to read body")
+				_, err := syscall.Read(incomingSocketFd, b)
+				handleErr(err)
 				body = append(body, b...)
 			}
 			break

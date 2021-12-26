@@ -17,6 +17,8 @@ to learn more about generic socket handling and prep for epoll/poll/select study
 
 see:
 
+- https://eklitzke.org/blocking-io-nonblocking-io-and-epoll (very good article on explaining key differences)
+
 - https://tldp.org/LDP/tlk/net/net.html (great starter article, although I used it for binding)
 
 - https://man7.org/linux/man-pages/man2/socketcall.2.html
@@ -52,16 +54,18 @@ func (hs *HttpServer) createSocket() {
 	var err error
 	hs.serverSocketFd, err = syscall.Socket(
 		syscall.AF_INET,
-		// SOCK_NONBLOCK & SOCK_CLOEXEC ensure net polling and close on exec
-		// we should be able to bitwise OR but uhh, no luck...
 		syscall.SOCK_STREAM,
 		0,
 	)
-	// apparently this is it in go's wrapper
-	syscall.CloseOnExec(hs.serverSocketFd)
-	syscall.SetNonblock(hs.serverSocketFd, true)
+
+	syscall.SetNonblock(hs.serverSocketFd, false)
 
 	handleErr(err)
+	// reuse existing socket fd
+	if err = syscall.SetsockoptInt(hs.serverSocketFd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+		panic(err)
+	}
+
 }
 
 func (hs *HttpServer) bindSocket(address []byte, port int) {
@@ -104,6 +108,7 @@ func (hs *HttpServer) Listen(address []byte, port int, backlog int) {
 
 // Break into own func for better profiling
 func (hs *HttpServer) respondToRequest(incomingSocketFd int) {
+	start := time.Now()
 	method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
 	compliant := handleCompliance(incomingSocketFd, proto)
 	if !compliant {
@@ -125,22 +130,33 @@ func (hs *HttpServer) respondToRequest(incomingSocketFd int) {
 		_, err := syscall.Write(incomingSocketFd, res.parse())
 		handleErr(err)
 	}
-	syscall.Close(incomingSocketFd)
+
+	err = syscall.Close(incomingSocketFd)
+	handleErr(err)
+	elapsed := time.Since(start)
+
+	if elapsed.Microseconds() > int64(7000) {
+		fmt.Printf("took %v to respond, fd: %v\n", elapsed.Microseconds(), incomingSocketFd)
+	}
+
 }
 
 func (hs *HttpServer) acceptIncomingConnections() {
 	reqCount := &struct{ count int }{count: 0}
-	// Can we have many accepts ...?
+
 	for {
-		// TODO: syscall.Select() open N descriptors to be selected from
-		// for accepting the call, for now creating them on the fly is ok
-		// https://man7.org/linux/man-pages/man2/select.2.html
-		// socket returns a network file descriptor that is ready for asynchronous I/O using the network poller.
 		incomingSocketFd, _, err := syscall.Accept(hs.serverSocketFd)
 
-		reqCount.count++
-		fmt.Printf("incoming request on: %v, err: %v, reqcount: %v\n", incomingSocketFd, err, reqCount.count)
-		go hs.respondToRequest(incomingSocketFd)
+		if incomingSocketFd != -1 && err == nil {
+			// https://stackoverflow.com/questions/22304631/what-is-the-purpose-to-set-sock-cloexec-flag-with-accept4-same-as-o-cloexec/22305269
+			syscall.CloseOnExec(incomingSocketFd)
+			reqCount.count++
+			if reqCount.count%1000 == 0 {
+				fmt.Printf("reqcount: %v\n", reqCount.count)
+			}
+
+			go hs.respondToRequest(incomingSocketFd)
+		}
 	}
 }
 
@@ -166,5 +182,5 @@ func main() {
 		time.Sleep(time.Second * 10)
 	})
 
-	server.Listen([]byte{127, 0, 0, 1}, 8000, 100000)
+	server.Listen([]byte{127, 0, 0, 1}, 8000, 0)
 }
