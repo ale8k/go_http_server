@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"syscall"
 	"time"
 )
@@ -50,9 +52,15 @@ func (hs *HttpServer) createSocket() {
 	var err error
 	hs.serverSocketFd, err = syscall.Socket(
 		syscall.AF_INET,
+		// SOCK_NONBLOCK & SOCK_CLOEXEC ensure net polling and close on exec
+		// we should be able to bitwise OR but uhh, no luck...
 		syscall.SOCK_STREAM,
-		0, // read more into SOCK_NONBLOCK & SOCK_CLOEXEC
+		0,
 	)
+	// apparently this is it in go's wrapper
+	syscall.CloseOnExec(hs.serverSocketFd)
+	syscall.SetNonblock(hs.serverSocketFd, true)
+
 	handleErr(err)
 }
 
@@ -94,48 +102,56 @@ func (hs *HttpServer) Listen(address []byte, port int, backlog int) {
 	hs.acceptIncomingConnections()
 }
 
+// Break into own func for better profiling
+func (hs *HttpServer) respondToRequest(incomingSocketFd int) {
+	method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
+	compliant := handleCompliance(incomingSocketFd, proto)
+	if !compliant {
+		return
+	}
+
+	headers, body, err := readIncomingPayload(incomingSocketFd)
+	handleErr(err)
+	req := &Request{Headers: headers, Body: body}
+	res := &Response{headers: make(map[string]string)}
+	cb := hs.Router.FindHandler(method, path)
+	if cb != nil {
+		cb(req, res)
+		_, err := syscall.Write(incomingSocketFd, res.parse())
+		handleErr(err)
+	} else {
+		res.SetStatus(404)
+		res.SetBody([]byte("No route matching " + method + ":" + path))
+		_, err := syscall.Write(incomingSocketFd, res.parse())
+		handleErr(err)
+	}
+	syscall.Close(incomingSocketFd)
+}
+
 func (hs *HttpServer) acceptIncomingConnections() {
+	reqCount := &struct{ count int }{count: 0}
+	// Can we have many accepts ...?
 	for {
 		// TODO: syscall.Select() open N descriptors to be selected from
 		// for accepting the call, for now creating them on the fly is ok
 		// https://man7.org/linux/man-pages/man2/select.2.html
-		incomingSocketFd, _, _ := syscall.Accept(hs.serverSocketFd)
-		go func() {
-			method, path, proto := getMethodPathProto(getStatusLine(incomingSocketFd))
-			compliant := handleCompliance(incomingSocketFd, proto)
-			if !compliant {
-				return
-			}
+		// socket returns a network file descriptor that is ready for asynchronous I/O using the network poller.
+		incomingSocketFd, _, err := syscall.Accept(hs.serverSocketFd)
 
-			headers, body, err := readIncomingPayload(incomingSocketFd)
-			handleErr(err)
-			req := &Request{Headers: headers, Body: body}
-			res := &Response{headers: make(map[string]string)}
-			cb := hs.Router.FindHandler(method, path)
-			if cb != nil {
-				cb(req, res)
-				written, err := syscall.Write(incomingSocketFd, res.parse())
-				handleErr(err)
-				fmt.Println("written: ", written)
-			} else {
-				res.SetStatus(404)
-				res.SetBody([]byte("No route matching " + method + ":" + path))
-				written, err := syscall.Write(incomingSocketFd, res.parse())
-				handleErr(err)
-				fmt.Println("written: ", written)
-			}
-			syscall.Close(incomingSocketFd)
-		}()
+		reqCount.count++
+		fmt.Printf("incoming request on: %v, err: %v, reqcount: %v\n", incomingSocketFd, err, reqCount.count)
+		go hs.respondToRequest(incomingSocketFd)
 	}
 }
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	server := HttpServer{Router: Router{Handlers: make(map[RequestPath]HandlerCallback)}}
 
 	server.Router.AddHandler("GET", "/1", func(req *Request, res *Response) {
-		res.AddHeader("Connection", "close")
-		res.SetBody([]byte("test"))
-		time.Sleep(time.Second * 10)
+		res.SetBody([]byte("Hello World"))
 	})
 
 	server.Router.AddHandler("GET", "/2", func(req *Request, res *Response) {
@@ -150,5 +166,5 @@ func main() {
 		time.Sleep(time.Second * 10)
 	})
 
-	server.Listen([]byte{127, 0, 0, 1}, 8000, 1)
+	server.Listen([]byte{127, 0, 0, 1}, 8000, 100000)
 }
